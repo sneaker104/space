@@ -1,90 +1,69 @@
-<!DOCTYPE html>
-<html lang="ko">
-<head>
-  <meta charset="UTF-8">
-  <title>First idle site</title>
-  <style>
-    body {
-      font-family: sans-serif;
-      text-align: center;
-      margin-top: 50px;
-    }
-    #score {
-      font-size: 32px;
-      margin-bottom: 20px;
-    }
-    #clickButton {
-      font-size: 24px;
-      padding: 10px 20px;
-      cursor: pointer;
-    }
-    #autoInfo {
-      margin-top: 20px;
-    }
-    button {
-      margin: 5px;
-    }
-  </style>
-</head>
-<body>
-  <h1>Space</h1>
-  <div id="score">점수: 0</div>
+<script>
+  const SAVE_KEY = "my_incremental_save_v1";
 
-  <button id="clickButton">클릭해서 점수 얻기 +1</button>
-
-  <div id="autoInfo">
-    <p>자동 생산기: <span id="autoCount">0</span>개</p>
-    <p>자동 생산기는 1초마다 점수 +1<br>
-       현재 가격: <span id="autoCost">10</span>점</p>
-    <button id="buyAuto">자동 생산기 구매</button>
-  </div>
-
-  <script>
-    let score = 0;               // 현재 점수
-    let autoCount = 0;           // 자동 생산기 개수
-    let autoCost = 10;           // 자동 생산기 가격
-
-    const scoreEl = document.getElementById('score');
-    const autoCountEl = document.getElementById('autoCount');
-    const autoCostEl = document.getElementById('autoCost');
-    const clickButton = document.getElementById('clickButton');
-    const buyAutoButton = document.getElementById('buyAuto');
-
-    function updateUI() {
-      scoreEl.textContent = `점수: ${score}`;
-      autoCountEl.textContent = autoCount;
-      autoCostEl.textContent = autoCost;
-    }
-
-    // 클릭 시 점수 +1
-    clickButton.addEventListener('click', () => {
-      score += 1;
-      updateUI();
-    });
-
-    // 자동 생산기 구매
-    buyAutoButton.addEventListener('click', () => {
-      if (score >= autoCost) {
-        score -= autoCost;
-        autoCount += 1;
-        // 가격 점점 증가
-        autoCost = Math.floor(autoCost * 1.5);
-        updateUI();
-      } else {
-        alert('점수가 부족합니다!');
+  function getDefaultSave() {
+    return {
+      version: 1,
+      resource: 0,
+      settings: {
+        autosave: true,
+        mute: false
       }
-    });
+    };
+  }
 
-    // 1초마다 자동 생산
-    setInterval(() => {
-      if (autoCount > 0) {
-        score += autoCount;
-        updateUI();
-      }
-    }, 1000);
+  function loadGame() {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) {
+      return getDefaultSave();
+    }
+    try {
+      const data = JSON.parse(raw);
+      // 기본값과 합쳐서 빠진 항목은 기본값으로 채움
+      return {
+        ...getDefaultSave(),
+        ...data,
+        settings: {
+          ...getDefaultSave().settings,
+          ...(data.settings || {})
+        }
+      };
+    } catch (e) {
+      console.error("저장 불러오기 실패", e);
+      return getDefaultSave();
+    }
+  }
 
-    // 처음 화면 갱신
-    updateUI();
-  </script>
-</body>
-</html>
+  function saveGame() {
+    try {
+      localStorage.setItem(SAVE_KEY, JSON.stringify(save));
+    } catch (e) {
+      console.error("저장 실패", e);
+    }
+  }
+
+  // 실제 게임 상태
+  let save = loadGame();
+
+  const resourceEl = document.getElementById("resource");
+  const gainBtn = document.getElementById("btn-gain");
+
+  function render() {
+    resourceEl.textContent = save.resource;
+  }
+
+  gainBtn.addEventListener("click", () => {
+    save.resource += 1;
+    render();
+  });
+
+  // 자동 저장 예시 10초마다
+  setInterval(() => {
+    if (save.settings.autosave) {
+      saveGame();
+    }
+  }, 10000);
+
+  // 페이지 들어오자마자 화면 반영
+  render();
+</script>
