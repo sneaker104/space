@@ -2,34 +2,32 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>모듈형 공장 게임</title>
+    <title>space</title>
     <style>
-        body { margin: 0; overflow: hidden; font-family: sans-serif; background-color: #2c3e50; user-select: none; }
-        #gameCanvas { display: block; width: 100vw; height: 100vh; }
-        #ui-layer { position: absolute; top: 0; right: 0; height: 100vh; display: flex; flex-direction: column; align-items: flex-end; pointer-events: none; }
-        #toggle-btn { pointer-events: auto; margin: 15px; padding: 10px; cursor: pointer; }
-        #sidebar { pointer-events: auto; width: 250px; height: 100%; background: #34495e; color: white; transform: translateX(100%); transition: 0.3s; padding: 20px; box-sizing: border-box; }
+        body { margin: 0; overflow: hidden; font-family: 'Malgun Gothic', sans-serif; background-color: #1e272e; user-select: none; }
+        #gameCanvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; }
+        
+        #ui-layer { position: absolute; top: 0; right: 0; height: 100vh; display: flex; flex-direction: column; align-items: flex-end; pointer-events: none; z-index: 10; }
+        #toggle-btn { pointer-events: auto; margin: 15px; padding: 12px 20px; cursor: pointer; background: #f39c12; color: white; border: none; border-radius: 5px; font-weight: bold; font-size: 16px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+        #sidebar { pointer-events: auto; width: 280px; height: 100%; background: #2f3640; color: white; transform: translateX(100%); transition: transform 0.3s ease; padding: 20px; box-sizing: border-box; box-shadow: -5px 0 15px rgba(0,0,0,0.5); overflow-y: auto; }
         #sidebar.open { transform: translateX(0); }
-        .build-item { background: #465c71; padding: 10px; margin-bottom: 10px; cursor: pointer; border: 2px solid transparent; border-radius: 5px; }
-        .build-item:hover { background: #5d758d; }
-        .build-item.active { border-color: #2ecc71; background: #27ae60; }
-        #info-box { position: absolute; top: 15px; left: 15px; background: rgba(0,0,0,0.6); color: white; padding: 15px; border-radius: 8px; }
+        
+        .build-item { background: #353b48; padding: 15px; margin-bottom: 10px; cursor: pointer; border: 2px solid #718093; border-radius: 5px; display: flex; align-items: center; transition: 0.2s; }
+        .build-item:hover { background: #404856; }
+        .build-item.active { border-color: #4cd137; background: #44bd32; }
+        .color-box { width: 20px; height: 20px; margin-right: 15px; border: 1px solid rgba(255,255,255,0.3); }
     </style>
 </head>
 <body>
     <canvas id="gameCanvas"></canvas>
-    
-    <div id="info-box">
-        <p>1. 우측 메뉴에서 기계 선택 후 클릭하여 설치</p>
-        <p>2. A기계 -> B기계 순서로 클릭하여 선 연결</p>
-        <p style="color:#f1c40f;">※ 채굴기(철광석) ➔ 용광로(철판) ➔ 저장소 순으로 연결하세요.</p>
-    </div>
 
     <div id="ui-layer">
-        <button id="toggle-btn">메뉴 열기</button>
+        <button id="toggle-btn">건설 메뉴 열기 ◀</button>
         <div id="sidebar">
-            <h3>건설 메뉴</h3>
+            <h3 style="margin-top:0;">건설 탭</h3>
             <div id="build-menu-container"></div>
+            <hr style="border-color: #555; margin: 20px 0;">
+            <p style="font-size: 13px; color:#dcdde1;">※ 기계를 클릭하여 선택 후, 다른 기계를 클릭하면 선이 연결됩니다.</p>
         </div>
     </div>
 

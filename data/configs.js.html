@@ -1,35 +1,34 @@
 // data/config.js
 
-// 자원의 종류 (이름과 표시될 이모지)
-export const RESOURCES = {
-    iron_ore: { name: "철광석", icon: "🪨" },
-    iron_plate: { name: "철판", icon: "🗜️" }
-};
+export const TILE_SIZE = 60; // 맵 격자(그리드)의 1칸 크기
 
-// 건설 가능한 기계들의 속성 (Input / Output 정의)
+// 건설 가능한 기계들의 속성 (크기, 색상, 입출력 정의)
 export const BUILDINGS = {
-    miner: {
-        id: "miner",
-        name: "채굴기",
-        desc: "철광석을 생산합니다.",
-        color: "#e74c3c", // 빨간색
-        input: null,      // 필요 자원 없음 (무에서 유를 창조)
-        output: "iron_ore"// 철광석 생산
+    copper_miner: {
+        id: "copper_miner", 
+        name: "구리 채굴기",
+        color: "#b87333", // 구리색
+        shape: [{x: 0, y: 0}], // 1x1 칸 차지
+        input: null, 
+        output: "copper",
+        maxCapacity: 50
     },
-    furnace: {
-        id: "furnace",
-        name: "용광로",
-        desc: "철광석을 받아 철판으로 굽습니다.",
-        color: "#e67e22", // 주황색
-        input: "iron_ore",// 철광석이 있어야만 작동
-        output: "iron_plate" // 철판 생산
+    steel_miner: {
+        id: "steel_miner", 
+        name: "강철 채굴기",
+        color: "#71797e", // 강철색
+        shape: [{x: 0, y: 0}, {x: 1, y: 0}], // 가로 2칸 차지
+        input: null, 
+        output: "steel",
+        maxCapacity: 100
     },
     storage: {
-        id: "storage",
-        name: "저장소",
-        desc: "모든 자원을 보관합니다.",
-        color: "#3498db", // 파란색
-        input: "all",     // 모든 자원 수용 가능
-        output: null      // 내보내지 않음
+        id: "storage", 
+        name: "종합 물류창고",
+        color: "#34495e", // 파란색
+        shape: [{x: 0, y: 0}, {x: 1, y: 0}, {x: 0, y: 1}, {x: 1, y: 1}], // 2x2 칸 (정사각형)
+        input: "all", 
+        output: null,
+        maxCapacity: 999
     }
 };

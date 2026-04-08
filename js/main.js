@@ -1,146 +1,140 @@
 // js/main.js
 
-// 1. 데이터 파일 불러오기
-import { BUILDINGS, RESOURCES } from '../data/config.js';
+import { TILE_SIZE, BUILDINGS } from '../data/config.js';
 
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
-canvas.width = window.innerWidth;
-canvas.height = window.innerHeight;
+function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
+window.addEventListener('resize', resize);
+resize();
 
-// 게임 상태
 let nodes = [];
 let links = [];
 let currentBuildMode = null;
 let selectedNode = null;
 
-// 2. UI 동적 생성 (config.js의 데이터를 바탕으로 버튼 만들기)
+// 1. UI 동적 생성
 const menuContainer = document.getElementById('build-menu-container');
-Object.values(BUILDINGS).forEach(building => {
+Object.values(BUILDINGS).forEach(b => {
     const btn = document.createElement('div');
     btn.className = 'build-item';
-    btn.dataset.type = building.id;
-    btn.innerHTML = `<b>${building.name}</b><br><small>${building.desc}</small>`;
+    let shapeText = b.shape.length > 1 ? `(${b.shape.length}칸)` : `(1칸)`;
+    btn.innerHTML = `<div class="color-box" style="background-color:${b.color};"></div>
+                     <div><b>${b.name}</b> <small>${shapeText}</small></div>`;
     
     btn.addEventListener('click', () => {
         document.querySelectorAll('.build-item').forEach(el => el.classList.remove('active'));
-        if (currentBuildMode === building.id) {
+        if (currentBuildMode === b.id) {
             currentBuildMode = null;
         } else {
             btn.classList.add('active');
-            currentBuildMode = building.id;
-            selectedNode = null;
+            currentBuildMode = b.id;
+            selectedNode = null; 
         }
     });
     menuContainer.appendChild(btn);
 });
 
-// 메뉴 토글 기능
+// 메뉴 열기/닫기
 const toggleBtn = document.getElementById('toggle-btn');
 const sidebar = document.getElementById('sidebar');
-toggleBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+toggleBtn.addEventListener('click', () => {
+    sidebar.classList.toggle('open');
+    toggleBtn.innerText = sidebar.classList.contains('open') ? '건설 메뉴 닫기 ▶' : '건설 메뉴 열기 ◀';
+});
 
-// 3. 캔버스 클릭 이벤트 (설치 및 연결)
+// 2. 헬퍼 함수
+function getBuildingAt(gx, gy) {
+    return nodes.find(n => n.typeInfo.shape.some(block => (n.x + block.x) === gx && (n.y + block.y) === gy));
+}
+
+function getPorts(n) {
+    const firstBlock = n.typeInfo.shape[0];
+    const lastBlock = n.typeInfo.shape[n.typeInfo.shape.length - 1];
+    return {
+        inX: (n.x + firstBlock.x) * TILE_SIZE, inY: (n.y + firstBlock.y) * TILE_SIZE + (TILE_SIZE / 2),
+        outX: (n.x + lastBlock.x) * TILE_SIZE + TILE_SIZE, outY: (n.y + lastBlock.y) * TILE_SIZE + (TILE_SIZE / 2)
+    };
+}
+
+// 3. 캔버스 클릭 (설치 및 연결)
 canvas.addEventListener('click', (e) => {
-    let clickedNode = nodes.find(n => Math.hypot(n.x - e.clientX, n.y - e.clientY) < 30);
+    const gridX = Math.floor(e.clientX / TILE_SIZE);
+    const gridY = Math.floor(e.clientY / TILE_SIZE);
+    const clickedNode = getBuildingAt(gridX, gridY);
 
     if (currentBuildMode) {
-        if (!clickedNode) {
-            nodes.push({
-                id: Date.now(),
-                x: e.clientX,
-                y: e.clientY,
-                typeInfo: BUILDINGS[currentBuildMode], // config에서 가져온 속성 연결
-                inventory: {} // 자원 보관함 (예: { iron_ore: 5 })
-            });
-            currentBuildMode = null;
+        const typeInfo = BUILDINGS[currentBuildMode];
+        let canBuild = true;
+        typeInfo.shape.forEach(block => {
+            if (getBuildingAt(gridX + block.x, gridY + block.y)) canBuild = false;
+        });
+
+        if (canBuild) {
+            nodes.push({ id: Date.now(), x: gridX, y: gridY, typeInfo: typeInfo, resources: 0 });
+            currentBuildMode = null; 
             document.querySelectorAll('.build-item').forEach(el => el.classList.remove('active'));
         }
     } else {
         if (clickedNode) {
-            if (!selectedNode) {
-                selectedNode = clickedNode; // 출발지 선택
-            } else {
-                if (selectedNode.id !== clickedNode.id) {
-                    // 도착지 선택 및 연결 저장
-                    links.push({ from: selectedNode, to: clickedNode });
-                }
-                selectedNode = null;
+            if (!selectedNode) selectedNode = clickedNode;
+            else {
+                if (selectedNode.id !== clickedNode.id) links.push({ from: selectedNode, to: clickedNode });
+                selectedNode = null; 
             }
-        } else {
-            selectedNode = null;
-        }
+        } else selectedNode = null; 
     }
 });
 
-// 4. 게임 루프 (자원 이동 로직)
+// 4. 게임 루프 (생산/이동 및 렌더링)
 let lastTick = Date.now();
 
 function gameLoop() {
     const now = Date.now();
     
-    if (now - lastTick > 1000) { // 1초마다 실행
-        // ① 자원 생산
+    if (now - lastTick > 1000) {
         nodes.forEach(n => {
-            if (n.typeInfo.input === null && n.typeInfo.output) {
-                // 채굴기처럼 인풋이 없는 경우 아웃풋 자원 생성
-                n.inventory[n.typeInfo.output] = (n.inventory[n.typeInfo.output] || 0) + 1;
-            }
-            
-            // 용광로 처리 (인풋이 있고, 그 인풋 자원을 가지고 있다면)
-            if (n.typeInfo.input !== null && n.typeInfo.input !== "all") {
-                if (n.inventory[n.typeInfo.input] > 0) {
-                    n.inventory[n.typeInfo.input] -= 1; // 원료 소모
-                    n.inventory[n.typeInfo.output] = (n.inventory[n.typeInfo.output] || 0) + 1; // 결과물 생성
-                }
-            }
+            if (n.typeInfo.input === null && n.resources < n.typeInfo.maxCapacity) n.resources++;
         });
-
-        // ② 자원 이동 (조건 검사 추가)
         links.forEach(link => {
-            const outType = link.from.typeInfo.output;
-            const inType = link.to.typeInfo.input;
-
-            // 출발지에 보낼 자원이 있고, 도착지가 그 자원을 받을 수 있거나 'all'인 경우에만 이동
-            if (outType && link.from.inventory[outType] > 0) {
-                if (inType === outType || inType === "all") {
-                    link.from.inventory[outType] -= 1;
-                    link.to.inventory[outType] = (link.to.inventory[outType] || 0) + 1;
-                }
+            if (link.from.resources > 0 && link.to.resources < link.to.typeInfo.maxCapacity) {
+                link.from.resources--; link.to.resources++;
             }
         });
         lastTick = now;
     }
 
-    // 5. 그리기 로직
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
+
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)'; ctx.lineWidth = 1;
+    for(let x = 0; x < canvas.width; x += TILE_SIZE) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke(); }
+    for(let y = 0; y < canvas.height; y += TILE_SIZE) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke(); }
+
     links.forEach(link => {
-        ctx.beginPath();
-        ctx.moveTo(link.from.x, link.from.y);
-        ctx.lineTo(link.to.x, link.to.y);
-        ctx.strokeStyle = '#7f8c8d'; ctx.lineWidth = 3; ctx.stroke();
+        const p1 = getPorts(link.from), p2 = getPorts(link.to);
+        ctx.beginPath(); ctx.moveTo(p1.outX, p1.outY); ctx.lineTo(p2.inX, p2.inY);
+        ctx.strokeStyle = 'rgba(236, 240, 241, 0.6)'; ctx.lineWidth = 3; ctx.stroke();
     });
 
     nodes.forEach(n => {
-        ctx.beginPath(); ctx.arc(n.x, n.y, 30, 0, Math.PI * 2);
-        ctx.fillStyle = n.typeInfo.color; ctx.fill();
-        
-        if (selectedNode === n) {
-            ctx.strokeStyle = 'white'; ctx.lineWidth = 3; ctx.stroke();
-        }
+        n.typeInfo.shape.forEach(block => {
+            const px = (n.x + block.x) * TILE_SIZE, py = (n.y + block.y) * TILE_SIZE;
+            ctx.fillStyle = n.typeInfo.color; ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+            ctx.strokeStyle = (selectedNode === n) ? '#f1c40f' : '#2c3e50'; ctx.lineWidth = (selectedNode === n) ? 3 : 1;
+            ctx.strokeRect(px, py, TILE_SIZE, TILE_SIZE);
+        });
 
-        // 보유 자원 텍스트 표시
-        ctx.fillStyle = 'white'; ctx.font = '12px Arial'; ctx.textAlign = 'center';
-        let yOffset = -5;
-        for (const [resType, amount] of Object.entries(n.inventory)) {
-            if (amount > 0) {
-                const icon = RESOURCES[resType]?.icon || "";
-                ctx.fillText(`${icon} ${amount}`, n.x, n.y + yOffset);
-                yOffset += 15;
-            }
-        }
-        ctx.fillText(n.typeInfo.name, n.x, n.y - 40);
+        const ports = getPorts(n);
+        ctx.fillStyle = '#2ecc71'; ctx.beginPath(); ctx.arc(ports.inX, ports.inY, 6, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = '#e74c3c'; ctx.beginPath(); ctx.arc(ports.outX, ports.outY, 6, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+
+        let maxX = 0, maxY = 0;
+        n.typeInfo.shape.forEach(b => { if(b.x > maxX) maxX = b.x; if(b.y > maxY) maxY = b.y; });
+        const centerX = (n.x + maxX/2) * TILE_SIZE + (TILE_SIZE / 2), centerY = (n.y + maxY/2) * TILE_SIZE + (TILE_SIZE / 2);
+
+        ctx.fillStyle = 'white'; ctx.textAlign = 'center';
+        ctx.font = 'bold 12px Arial'; ctx.fillText(n.typeInfo.name, centerX, centerY - 6);
+        ctx.font = '14px Arial'; ctx.fillText(`${n.resources} / ${n.typeInfo.maxCapacity}`, centerX, centerY + 12);
     });
 
     requestAnimationFrame(gameLoop);
