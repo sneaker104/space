@@ -2,12 +2,11 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>space</title>
+    <title>그리드 공장 게임</title>
     <style>
         body { margin: 0; overflow: hidden; font-family: 'Malgun Gothic', sans-serif; background-color: #1e272e; user-select: none; }
         #gameCanvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; }
         
-        /* 건설 UI 레이어 */
         #ui-layer { position: absolute; top: 0; right: 0; height: 100vh; display: flex; flex-direction: column; align-items: flex-end; pointer-events: none; z-index: 10; }
         #toggle-btn { pointer-events: auto; margin: 15px; padding: 12px 20px; cursor: pointer; background: #f39c12; color: white; border: none; border-radius: 5px; font-weight: bold; font-size: 16px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
         #sidebar { pointer-events: auto; width: 280px; height: 100%; background: #2f3640; color: white; transform: translateX(100%); transition: transform 0.3s ease; padding: 20px; box-sizing: border-box; box-shadow: -5px 0 15px rgba(0,0,0,0.5); overflow-y: auto; display: flex; flex-direction: column; }
@@ -18,9 +17,11 @@
         .build-item.active { border-color: #4cd137; background: #44bd32; }
         .color-box { width: 20px; height: 20px; margin-right: 15px; border: 1px solid rgba(255,255,255,0.3); }
 
-        /* --- 신규: 설정 버튼 및 모달(팝업창) 스타일 --- */
         #settings-btn { position: absolute; top: 15px; left: 15px; padding: 10px 15px; background: #34495e; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; font-size: 18px; z-index: 10; box-shadow: 0 4px 6px rgba(0,0,0,0.3); transition: 0.2s; }
         #settings-btn:hover { background: #2c3e50; }
+
+        /* --- ★ 신규: 상단 보유 자원 상태 바 --- */
+        #resource-bar { position: absolute; top: 15px; left: 50%; transform: translateX(-50%); background: #2f3640; color: #f1c40f; padding: 10px 25px; border-radius: 20px; font-weight: bold; font-size: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); z-index: 10; display: flex; gap: 20px; pointer-events: none; border: 2px solid #34495e; }
 
         #settings-modal { display: none; position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.7); z-index: 20; justify-content: center; align-items: center; }
         .modal-content { background: #2f3640; color: white; padding: 30px; border-radius: 10px; width: 400px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); display: flex; flex-direction: column; gap: 15px; }
@@ -39,27 +40,24 @@
     <canvas id="gameCanvas"></canvas>
 
     <button id="settings-btn">⚙️ 설정</button>
+    <div id="resource-bar">보유 자원: 없음</div>
 
     <div id="settings-modal">
         <div class="modal-content">
             <h2>게임 설정</h2>
-            
             <p style="margin: 0; font-size: 13px; color: #bdc3c7;">현재 진행 상황은 1초마다 자동 저장됩니다.</p>
             <button id="export-btn">💾 현재 진행상황 TXT로 내보내기</button>
-            
             <hr style="border-color: #555; width: 100%; margin: 10px 0;">
-            
             <p style="margin: 0; font-size: 13px; color: #bdc3c7;">저장된 TXT 파일의 내용을 아래에 붙여넣고 로드하세요.</p>
             <textarea id="import-text" placeholder="여기에 텍스트를 붙여넣으세요..."></textarea>
             <button id="import-btn">📂 위 텍스트로 로드하기</button>
-
             <button id="reset-btn">🗑️ 모든 데이터 초기화</button>
             <button id="close-modal-btn">닫기</button>
         </div>
     </div>
 
     <div id="ui-layer">
-        <button id="toggle-btn">메뉴◀</button>
+        <button id="toggle-btn">건설 메뉴 열기 ◀</button>
         <div id="sidebar">
             <h3 style="margin-top:0;">건설 탭</h3>
             <div id="build-menu-container"></div>
