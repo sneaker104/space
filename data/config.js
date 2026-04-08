@@ -28,7 +28,7 @@ export const BUILDINGS = {
         color: "#34495e", // 파란색
         shape: [{x: 0, y: 0}, {x: 1, y: 0}, {x: 0, y: 1}, {x: 1, y: 1}], // 2x2 칸 (정사각형)
         input: "all", 
-        output: null,
+        output: "all",  // 저장소에서도 다른 곳으로 뺄 수 있도록 변경
         maxCapacity: 999
     }
 };
