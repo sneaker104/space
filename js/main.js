@@ -1,6 +1,7 @@
 // js/main.js
 
 import { TILE_SIZE, BUILDINGS } from '../data/config.js';
+import { I18N } from '../data/i18n.js'; // 분리된 번역 데이터 불러오기
 
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
@@ -20,13 +21,107 @@ let links = [];
 let currentBuildMode = null;
 let selectedNode = null;
 
-// [신규/수정] 드래그 & 선 자르기 변수
 let isLeftDown = false;
 let draggedNode = null;
-let isDraggingNode = false; // 클릭 vs 드래그 판별용
-let dragOffset = { gridX: 0, gridY: 0 }; // 클릭한 블록 위치 보정용
+let isDraggingNode = false; 
+let dragOffset = { gridX: 0, gridY: 0 }; 
 let dragStartMousePos = { x: 0, y: 0 };
 let swipeTrail = []; 
+
+// 세이브 저장을 위한 고유 키
+const SAVE_KEY = 'spaceFactorySaveData';
+
+// ---------------------------------------------------
+// [신규] 세이브 & 로드 핵심 로직
+// ---------------------------------------------------
+function saveGame() {
+    const saveData = {
+        camera: camera,
+        nodes: nodes.map(n => ({ id: n.id, x: n.x, y: n.y, typeId: n.typeInfo.id, resources: n.resources })),
+        links: links.map(l => ({ fromId: l.from.id, toId: l.to.id }))
+    };
+    localStorage.setItem(SAVE_KEY, JSON.stringify(saveData));
+}
+
+function loadGame() {
+    const savedStr = localStorage.getItem(SAVE_KEY);
+    if (savedStr) {
+        try {
+            const saveData = JSON.parse(savedStr);
+            if (saveData.camera) camera = saveData.camera;
+            nodes = saveData.nodes.map(n => ({
+                id: n.id, x: n.x, y: n.y, typeInfo: BUILDINGS[n.typeId], resources: n.resources || 0
+            })).filter(n => n.typeInfo);
+            
+            links = [];
+            saveData.links.forEach(l => {
+                const fromNode = nodes.find(n => n.id === l.fromId);
+                const toNode = nodes.find(n => n.id === l.toId);
+                if (fromNode && toNode) links.push({ from: fromNode, to: toNode });
+            });
+        } catch (e) {
+            console.error("세이브 로드 오류:", e);
+        }
+    }
+}
+
+// ---------------------------------------------------
+// [신규] 설정 창 및 TXT 추출/붙여넣기 UI 이벤트
+// ---------------------------------------------------
+const settingsBtn = document.getElementById('settings-btn');
+const settingsModal = document.getElementById('settings-modal');
+const closeModalBtn = document.getElementById('close-modal-btn');
+
+// 1. 모달 열기/닫기
+if (settingsBtn) settingsBtn.addEventListener('click', () => { settingsModal.style.display = 'flex'; });
+if (closeModalBtn) closeModalBtn.addEventListener('click', () => { settingsModal.style.display = 'none'; });
+
+// 2. TXT로 내보내기 (Export)
+const exportBtn = document.getElementById('export-btn');
+if (exportBtn) {
+    exportBtn.addEventListener('click', () => {
+        saveGame(); // 최신 상태 저장
+        const savedStr = localStorage.getItem(SAVE_KEY);
+        if (!savedStr) return alert("저장할 데이터가 없습니다.");
+
+        const blob = new Blob([savedStr], { type: "text/plain" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = "space_factory_save.txt"; // 다운로드될 파일명
+        a.click();
+        URL.revokeObjectURL(url);
+    });
+}
+
+// 3. 텍스트로 로드하기 (Import)
+const importBtn = document.getElementById('import-btn');
+if (importBtn) {
+    importBtn.addEventListener('click', () => {
+        const importStr = document.getElementById('import-text').value.trim();
+        if (!importStr) return alert("텍스트를 입력해 주세요.");
+
+        try {
+            JSON.parse(importStr); // 유효한 데이터인지 검사
+            localStorage.setItem(SAVE_KEY, importStr); // 강제 덮어쓰기
+            alert("성공적으로 데이터를 로드했습니다! 화면을 새로고침합니다.");
+            location.reload(); // 강제 새로고침하여 적용
+        } catch (e) {
+            alert("잘못된 형식의 텍스트입니다. 복사한 내용을 다시 확인해주세요.");
+        }
+    });
+}
+
+// 4. 데이터 초기화
+const resetBtn = document.getElementById('reset-btn');
+if (resetBtn) {
+    resetBtn.addEventListener('click', () => {
+        if (confirm("정말 모든 세이브 데이터를 지우고 처음부터 다시 시작하시겠습니까?")) {
+            localStorage.removeItem(SAVE_KEY);
+            location.reload(); 
+        }
+    });
+}
 
 // ---------------------------------------------------
 // UI 생성
@@ -59,11 +154,9 @@ document.getElementById('toggle-btn').addEventListener('click', () => {
 function screenToWorld(screenX, screenY) {
     return { x: (screenX - camera.x) / camera.zoom, y: (screenY - camera.y) / camera.zoom };
 }
-
 function getBuildingAt(gx, gy) {
     return nodes.find(n => n.typeInfo.shape.some(block => (n.x + block.x) === gx && (n.y + block.y) === gy));
 }
-
 function getPorts(n) {
     const first = n.typeInfo.shape[0];
     const last = n.typeInfo.shape[n.typeInfo.shape.length - 1];
@@ -72,26 +165,15 @@ function getPorts(n) {
         outX: (n.x + last.x) * TILE_SIZE + TILE_SIZE, outY: (n.y + last.y) * TILE_SIZE + (TILE_SIZE / 2)
     };
 }
-
-
 function canConnect(nodeA, nodeB) {
     let outType = nodeA.typeInfo.output;
     let inType = nodeB.typeInfo.input;
-
     if (!outType || !inType) return false;
-
-    // 만약 데이터가 문자열이면 배열로 변환 (호환성 유지)
     if (!Array.isArray(outType)) outType = [outType];
     if (!Array.isArray(inType)) inType = [inType];
-
-    // 둘 중 하나라도 'all'을 포함하고 있으면 연결 허용
     if (outType.includes('all') || inType.includes('all')) return true;
-
-    // 출발지의 아웃풋 중 하나라도 도착지의 인풋에 포함되는지(교집합) 확인
     return outType.some(resource => inType.includes(resource));
 }
-
-// [신규] 점과 선분 사이의 거리 계산 (정확한 선 자르기용)
 function distToSegment(P, A, B) {
     const l2 = (B.x - A.x)**2 + (B.y - A.y)**2;
     if (l2 === 0) return Math.hypot(P.x - A.x, P.y - A.y);
@@ -105,6 +187,8 @@ function distToSegment(P, A, B) {
 // 마우스 이벤트 로직
 // ---------------------------------------------------
 canvas.addEventListener('wheel', (e) => {
+    if (settingsModal && settingsModal.style.display === 'flex') return; // 모달 창 열려있으면 동작 방지
+
     const zoomAmount = 0.1; const oldZoom = camera.zoom;
     if (e.deltaY < 0) camera.zoom = Math.min(camera.zoom + zoomAmount, 3);
     else camera.zoom = Math.max(camera.zoom - zoomAmount, 0.4);
@@ -114,6 +198,8 @@ canvas.addEventListener('wheel', (e) => {
 canvas.addEventListener('contextmenu', e => e.preventDefault());
 
 canvas.addEventListener('mousedown', (e) => {
+    if (settingsModal && settingsModal.style.display === 'flex') return; // 모달 창 열려있으면 동작 방지
+
     if (e.button === 2) { 
         isRightDragging = true; lastMouse = { x: e.clientX, y: e.clientY }; 
     } 
@@ -135,13 +221,10 @@ canvas.addEventListener('mousedown', (e) => {
         } else {
             const clickedNode = getBuildingAt(gridX, gridY);
             if (clickedNode) {
-                // 노드 드래그 준비
-                draggedNode = clickedNode;
-                isDraggingNode = false;
+                draggedNode = clickedNode; isDraggingNode = false;
                 dragStartMousePos = { x: e.clientX, y: e.clientY };
-                dragOffset = { gridX: gridX - clickedNode.x, gridY: gridY - clickedNode.y }; // 큰 기계 이동 보정
+                dragOffset = { gridX: gridX - clickedNode.x, gridY: gridY - clickedNode.y }; 
             } else {
-                // 선 자르기 준비
                 swipeTrail = [worldPos];
             }
         }
@@ -149,6 +232,8 @@ canvas.addEventListener('mousedown', (e) => {
 });
 
 window.addEventListener('mousemove', (e) => {
+    if (settingsModal && settingsModal.style.display === 'flex') return; // 모달 창 열려있으면 동작 방지
+
     if (isRightDragging) {
         camera.x += (e.clientX - lastMouse.x); camera.y += (e.clientY - lastMouse.y);
         lastMouse = { x: e.clientX, y: e.clientY };
@@ -159,7 +244,6 @@ window.addEventListener('mousemove', (e) => {
         const worldPos = screenToWorld(e.clientX, e.clientY);
 
         if (draggedNode) {
-            // 마우스를 5px 이상 움직이면 드래그로 판정
             if (!isDraggingNode && Math.hypot(e.clientX - dragStartMousePos.x, e.clientY - dragStartMousePos.y) > 5) {
                 isDraggingNode = true;
             }
@@ -181,11 +265,10 @@ window.addEventListener('mousemove', (e) => {
             swipeTrail.push(worldPos);
             if (swipeTrail.length > 15) swipeTrail.shift();
 
-            // [수정] 마우스 궤적과 선 사이의 거리가 15픽셀 이내면 절단!
             links = links.filter(link => {
                 const p1 = getPorts(link.from), p2 = getPorts(link.to);
                 const dist = distToSegment(worldPos, {x: p1.outX, y: p1.outY}, {x: p2.inX, y: p2.inY});
-                return dist > 15; // 거리가 멀면 유지, 가까우면(자르면) 삭제
+                return dist > 15; 
             });
         }
     }
@@ -195,8 +278,6 @@ window.addEventListener('mouseup', (e) => {
     if (e.button === 2) isRightDragging = false;
     else if (e.button === 0) {
         isLeftDown = false;
-        
-        // 제자리 클릭인 경우 (연결)
         if (draggedNode && !isDraggingNode) {
             if (!selectedNode) selectedNode = draggedNode;
             else {
@@ -207,25 +288,27 @@ window.addEventListener('mouseup', (e) => {
                 selectedNode = null; 
             }
         } 
-        // 드래그가 끝난 경우
         else if (draggedNode && isDraggingNode) {
             selectedNode = null; 
         }
-        
         draggedNode = null;
         swipeTrail = [];
     }
 });
 
 // ---------------------------------------------------
+// 게임 시작 (저장된 데이터 불러오기)
+// ---------------------------------------------------
+loadGame();
+
+// ---------------------------------------------------
 // 게임 루프 및 렌더링
 // ---------------------------------------------------
-const I18N = { 'all': '모든자원', 'copper': '구리', 'steel': '강철' }; // 한글 번역용 맵
-
 let lastTick = Date.now();
 function gameLoop() {
     const now = Date.now();
     
+    // 1초마다 자원 증가 및 자동 저장
     if (now - lastTick > 1000) {
         nodes.forEach(n => { if (n.typeInfo.input === null && n.resources < n.typeInfo.maxCapacity) n.resources++; });
         links.forEach(link => {
@@ -233,6 +316,7 @@ function gameLoop() {
                 link.from.resources--; link.to.resources++;
             }
         });
+        saveGame(); // ★ 주기적으로 자동 저장
         lastTick = now;
     }
 
@@ -248,7 +332,7 @@ function gameLoop() {
     for(let x = startX; x < endX; x += TILE_SIZE) { ctx.beginPath(); ctx.moveTo(x, startY); ctx.lineTo(x, endY); ctx.stroke(); }
     for(let y = startY; y < endY; y += TILE_SIZE) { ctx.beginPath(); ctx.moveTo(startX, y); ctx.lineTo(endX, y); ctx.stroke(); }
 
-    // 2. 노드(기계) 몸통 먼저 렌더링
+    // 2. 노드 몸통 렌더링
     nodes.forEach(n => {
         n.typeInfo.shape.forEach(block => {
             const px = (n.x + block.x) * TILE_SIZE, py = (n.y + block.y) * TILE_SIZE;
@@ -266,19 +350,18 @@ function gameLoop() {
         ctx.strokeStyle = 'rgba(231, 76, 60, 0.8)'; ctx.lineWidth = 4 / camera.zoom; ctx.lineCap = 'round'; ctx.stroke();
     }
 
-    // 4. 선(링크) 렌더링 (★노드 몸통 위에 렌더링되어 가려지지 않음)
+    // 4. 선 렌더링
     links.forEach(link => {
         const p1 = getPorts(link.from), p2 = getPorts(link.to);
         ctx.beginPath(); ctx.moveTo(p1.outX, p1.outY); ctx.lineTo(p2.inX, p2.inY);
-        // 선이 잘 보이도록 하얀색에 가까운 밝은 빛 추가
         ctx.shadowBlur = 8; ctx.shadowColor = 'white'; 
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)'; 
         ctx.lineWidth = 4; ctx.stroke();
-        ctx.shadowBlur = 0; // 그림자 초기화
+        ctx.shadowBlur = 0; 
     });
 
-    // 5. 노드 안의 텍스트 및 점(포트) 렌더링 (★선 위에 텍스트가 보이도록 제일 마지막에 렌더링)
-nodes.forEach(n => {
+    // 5. 텍스트 및 포트 렌더링
+    nodes.forEach(n => {
         const ports = getPorts(n);
         ctx.fillStyle = '#2ecc71'; ctx.beginPath(); ctx.arc(ports.inX, ports.inY, 6, 0, Math.PI*2); ctx.fill(); ctx.stroke();
         ctx.fillStyle = '#e74c3c'; ctx.beginPath(); ctx.arc(ports.outX, ports.outY, 6, 0, Math.PI*2); ctx.fill(); ctx.stroke();
@@ -288,13 +371,10 @@ nodes.forEach(n => {
         const centerX = (n.x + maxX/2) * TILE_SIZE + (TILE_SIZE / 2);
         const centerY = (n.y + maxY/2) * TILE_SIZE + (TILE_SIZE / 2);
 
-        // ==========================================
-        // 여기서부터 교체된 부분입니다 (배열 지원 텍스트 포맷팅)
-        // ==========================================
         const formatIO = (io) => {
             if (!io) return '없음';
             const arr = Array.isArray(io) ? io : [io];
-            return arr.map(res => I18N[res] || res).join(', '); // 여러 개면 쉼표로 연결
+            return arr.map(res => I18N[res] || res).join(', '); 
         };
 
         const inTxt = `IN: ${formatIO(n.typeInfo.input)}`;
@@ -307,7 +387,6 @@ nodes.forEach(n => {
         ctx.font = '10px Arial'; ctx.fillStyle = '#bdc3c7';
         ctx.fillText(inTxt, centerX, centerY + 20);
         ctx.fillText(outTxt, centerX, centerY + 32);
-        // ==========================================
     });
 
     ctx.restore();

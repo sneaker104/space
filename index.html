@@ -7,27 +7,64 @@
         body { margin: 0; overflow: hidden; font-family: 'Malgun Gothic', sans-serif; background-color: #1e272e; user-select: none; }
         #gameCanvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; }
         
+        /* 건설 UI 레이어 */
         #ui-layer { position: absolute; top: 0; right: 0; height: 100vh; display: flex; flex-direction: column; align-items: flex-end; pointer-events: none; z-index: 10; }
         #toggle-btn { pointer-events: auto; margin: 15px; padding: 12px 20px; cursor: pointer; background: #f39c12; color: white; border: none; border-radius: 5px; font-weight: bold; font-size: 16px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
-        #sidebar { pointer-events: auto; width: 280px; height: 100%; background: #2f3640; color: white; transform: translateX(100%); transition: transform 0.3s ease; padding: 20px; box-sizing: border-box; box-shadow: -5px 0 15px rgba(0,0,0,0.5); overflow-y: auto; }
+        #sidebar { pointer-events: auto; width: 280px; height: 100%; background: #2f3640; color: white; transform: translateX(100%); transition: transform 0.3s ease; padding: 20px; box-sizing: border-box; box-shadow: -5px 0 15px rgba(0,0,0,0.5); overflow-y: auto; display: flex; flex-direction: column; }
         #sidebar.open { transform: translateX(0); }
         
         .build-item { background: #353b48; padding: 15px; margin-bottom: 10px; cursor: pointer; border: 2px solid #718093; border-radius: 5px; display: flex; align-items: center; transition: 0.2s; }
         .build-item:hover { background: #404856; }
         .build-item.active { border-color: #4cd137; background: #44bd32; }
         .color-box { width: 20px; height: 20px; margin-right: 15px; border: 1px solid rgba(255,255,255,0.3); }
+
+        /* --- 신규: 설정 버튼 및 모달(팝업창) 스타일 --- */
+        #settings-btn { position: absolute; top: 15px; left: 15px; padding: 10px 15px; background: #34495e; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; font-size: 18px; z-index: 10; box-shadow: 0 4px 6px rgba(0,0,0,0.3); transition: 0.2s; }
+        #settings-btn:hover { background: #2c3e50; }
+
+        #settings-modal { display: none; position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.7); z-index: 20; justify-content: center; align-items: center; }
+        .modal-content { background: #2f3640; color: white; padding: 30px; border-radius: 10px; width: 400px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); display: flex; flex-direction: column; gap: 15px; }
+        .modal-content h2 { margin: 0 0 10px 0; text-align: center; border-bottom: 1px solid #718093; padding-bottom: 10px; }
+        .modal-content button { padding: 10px; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; font-size: 14px; transition: 0.2s; }
+        
+        #export-btn { background: #3498db; color: white; } #export-btn:hover { background: #2980b9; }
+        #import-btn { background: #2ecc71; color: white; margin-top: 5px; } #import-btn:hover { background: #27ae60; }
+        #reset-btn { background: #e74c3c; color: white; margin-top: 20px; } #reset-btn:hover { background: #c0392b; }
+        #close-modal-btn { background: #95a5a6; color: white; } #close-modal-btn:hover { background: #7f8c8d; }
+        
+        #import-text { width: 100%; height: 80px; resize: none; border-radius: 5px; padding: 10px; box-sizing: border-box; background: #1e272e; color: #bdc3c7; border: 1px solid #718093; font-family: monospace; }
     </style>
 </head>
 <body>
     <canvas id="gameCanvas"></canvas>
 
+    <button id="settings-btn">⚙️ 설정</button>
+
+    <div id="settings-modal">
+        <div class="modal-content">
+            <h2>게임 설정</h2>
+            
+            <p style="margin: 0; font-size: 13px; color: #bdc3c7;">현재 진행 상황은 1초마다 자동 저장됩니다.</p>
+            <button id="export-btn">💾 현재 진행상황 TXT로 내보내기</button>
+            
+            <hr style="border-color: #555; width: 100%; margin: 10px 0;">
+            
+            <p style="margin: 0; font-size: 13px; color: #bdc3c7;">저장된 TXT 파일의 내용을 아래에 붙여넣고 로드하세요.</p>
+            <textarea id="import-text" placeholder="여기에 텍스트를 붙여넣으세요..."></textarea>
+            <button id="import-btn">📂 위 텍스트로 로드하기</button>
+
+            <button id="reset-btn">🗑️ 모든 데이터 초기화</button>
+            <button id="close-modal-btn">닫기</button>
+        </div>
+    </div>
+
     <div id="ui-layer">
-        <button id="toggle-btn">건설 메뉴◀</button>
+        <button id="toggle-btn">메뉴◀</button>
         <div id="sidebar">
-            <h3 style="margin-top:0;">탭</h3>
+            <h3 style="margin-top:0;">건설 탭</h3>
             <div id="build-menu-container"></div>
             <hr style="border-color: #555; margin: 20px 0;">
-            <p style="font-size: 13px; color:#dcdde1;">※ 기계를 클릭하여 선택 후, 다른 기계를 클릭하면 선이 연결</p>
+            <p style="font-size: 13px; color:#dcdde1;">※ 기계를 클릭하여 드래그하면 이동합니다.<br>※ 빈 공간을 드래그해 선을 자를 수 있습니다.</p>
         </div>
     </div>
 
