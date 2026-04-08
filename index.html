@@ -1,85 +1,38 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-  <meta charset="UTF-8">
-  <title>나의 증분형 게임</title>
+    <meta charset="UTF-8">
+    <title>모듈형 공장 게임</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: sans-serif; background-color: #2c3e50; user-select: none; }
+        #gameCanvas { display: block; width: 100vw; height: 100vh; }
+        #ui-layer { position: absolute; top: 0; right: 0; height: 100vh; display: flex; flex-direction: column; align-items: flex-end; pointer-events: none; }
+        #toggle-btn { pointer-events: auto; margin: 15px; padding: 10px; cursor: pointer; }
+        #sidebar { pointer-events: auto; width: 250px; height: 100%; background: #34495e; color: white; transform: translateX(100%); transition: 0.3s; padding: 20px; box-sizing: border-box; }
+        #sidebar.open { transform: translateX(0); }
+        .build-item { background: #465c71; padding: 10px; margin-bottom: 10px; cursor: pointer; border: 2px solid transparent; border-radius: 5px; }
+        .build-item:hover { background: #5d758d; }
+        .build-item.active { border-color: #2ecc71; background: #27ae60; }
+        #info-box { position: absolute; top: 15px; left: 15px; background: rgba(0,0,0,0.6); color: white; padding: 15px; border-radius: 8px; }
+    </style>
 </head>
 <body>
-  <h1>나의 증분형 게임</h1>
-  <div>
-    자원 수: <span id="resource">0</span>
-  </div>
-  <button id="btn-gain">자원 얻기</button>
+    <canvas id="gameCanvas"></canvas>
+    
+    <div id="info-box">
+        <p>1. 우측 메뉴에서 기계 선택 후 클릭하여 설치</p>
+        <p>2. A기계 -> B기계 순서로 클릭하여 선 연결</p>
+        <p style="color:#f1c40f;">※ 채굴기(철광석) ➔ 용광로(철판) ➔ 저장소 순으로 연결하세요.</p>
+    </div>
 
-<script>
-  const SAVE_KEY = "my_incremental_save_v1";
+    <div id="ui-layer">
+        <button id="toggle-btn">메뉴 열기</button>
+        <div id="sidebar">
+            <h3>건설 메뉴</h3>
+            <div id="build-menu-container"></div>
+        </div>
+    </div>
 
-  function getDefaultSave() {
-    return {
-      version: 1,
-      resource: 0,
-      settings: {
-        autosave: true,
-        mute: false
-      }
-    };
-  }
-
-  function loadGame() {
-    const raw = localStorage.getItem(SAVE_KEY);
-    if (!raw) {
-      return getDefaultSave();
-    }
-    try {
-      const data = JSON.parse(raw);
-      // 기본값과 합쳐서 빠진 항목은 기본값으로 채움
-      return {
-        ...getDefaultSave(),
-        ...data,
-        settings: {
-          ...getDefaultSave().settings,
-          ...(data.settings || {})
-        }
-      };
-    } catch (e) {
-      console.error("저장 불러오기 실패", e);
-      return getDefaultSave();
-    }
-  }
-
-  function saveGame() {
-    try {
-      localStorage.setItem(SAVE_KEY, JSON.stringify(save));
-    } catch (e) {
-      console.error("저장 실패", e);
-    }
-  }
-
-  // 실제 게임 상태
-  let save = loadGame();
-
-  const resourceEl = document.getElementById("resource");
-  const gainBtn = document.getElementById("btn-gain");
-
-  function render() {
-    resourceEl.textContent = save.resource;
-  }
-
-  gainBtn.addEventListener("click", () => {
-    save.resource += 1;
-    render();
-  });
-
-  // 자동 저장 예시 10초마다
-  setInterval(() => {
-    if (save.settings.autosave) {
-      saveGame();
-    }
-  }, 10000);
-
-  // 페이지 들어오자마자 화면 반영
-  render();
-</script>
-
+    <script type="module" src="./js/main.js"></script>
 </body>
 </html>
