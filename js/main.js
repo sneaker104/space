@@ -73,13 +73,22 @@ function getPorts(n) {
     };
 }
 
-// [수정] 자원 연결 조건 (all 호환성 추가)
+
 function canConnect(nodeA, nodeB) {
-    const outType = nodeA.typeInfo.output;
-    const inType = nodeB.typeInfo.input;
+    let outType = nodeA.typeInfo.output;
+    let inType = nodeB.typeInfo.input;
+
     if (!outType || !inType) return false;
-    if (outType === 'all' || inType === 'all' || outType === inType) return true;
-    return false;
+
+    // 만약 데이터가 문자열이면 배열로 변환 (호환성 유지)
+    if (!Array.isArray(outType)) outType = [outType];
+    if (!Array.isArray(inType)) inType = [inType];
+
+    // 둘 중 하나라도 'all'을 포함하고 있으면 연결 허용
+    if (outType.includes('all') || inType.includes('all')) return true;
+
+    // 출발지의 아웃풋 중 하나라도 도착지의 인풋에 포함되는지(교집합) 확인
+    return outType.some(resource => inType.includes(resource));
 }
 
 // [신규] 점과 선분 사이의 거리 계산 (정확한 선 자르기용)
@@ -269,7 +278,7 @@ function gameLoop() {
     });
 
     // 5. 노드 안의 텍스트 및 점(포트) 렌더링 (★선 위에 텍스트가 보이도록 제일 마지막에 렌더링)
-    nodes.forEach(n => {
+nodes.forEach(n => {
         const ports = getPorts(n);
         ctx.fillStyle = '#2ecc71'; ctx.beginPath(); ctx.arc(ports.inX, ports.inY, 6, 0, Math.PI*2); ctx.fill(); ctx.stroke();
         ctx.fillStyle = '#e74c3c'; ctx.beginPath(); ctx.arc(ports.outX, ports.outY, 6, 0, Math.PI*2); ctx.fill(); ctx.stroke();
@@ -279,9 +288,17 @@ function gameLoop() {
         const centerX = (n.x + maxX/2) * TILE_SIZE + (TILE_SIZE / 2);
         const centerY = (n.y + maxY/2) * TILE_SIZE + (TILE_SIZE / 2);
 
-        // I/O 가능 자원 텍스트
-        const inTxt = n.typeInfo.input ? `IN: ${I18N[n.typeInfo.input]||n.typeInfo.input}` : 'IN: 없음';
-        const outTxt = n.typeInfo.output ? `OUT: ${I18N[n.typeInfo.output]||n.typeInfo.output}` : 'OUT: 없음';
+        // ==========================================
+        // 여기서부터 교체된 부분입니다 (배열 지원 텍스트 포맷팅)
+        // ==========================================
+        const formatIO = (io) => {
+            if (!io) return '없음';
+            const arr = Array.isArray(io) ? io : [io];
+            return arr.map(res => I18N[res] || res).join(', '); // 여러 개면 쉼표로 연결
+        };
+
+        const inTxt = `IN: ${formatIO(n.typeInfo.input)}`;
+        const outTxt = `OUT: ${formatIO(n.typeInfo.output)}`;
 
         ctx.fillStyle = 'white'; ctx.textAlign = 'center';
         ctx.font = 'bold 12px Arial'; ctx.fillText(n.typeInfo.name, centerX, centerY - 15);
@@ -290,6 +307,7 @@ function gameLoop() {
         ctx.font = '10px Arial'; ctx.fillStyle = '#bdc3c7';
         ctx.fillText(inTxt, centerX, centerY + 20);
         ctx.fillText(outTxt, centerX, centerY + 32);
+        // ==========================================
     });
 
     ctx.restore();
