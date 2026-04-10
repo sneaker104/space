@@ -1,4 +1,5 @@
 // js/main.js
+console.log("🚀 게임 스크립트가 정상적으로 로드되었습니다!");
 
 import { TILE_SIZE, BUILDINGS } from '../data/config.js';
 import { I18N } from '../data/i18n.js';
@@ -31,7 +32,7 @@ let swipeTrail = [];
 const SAVE_KEY = 'spaceFactorySaveData';
 
 // ---------------------------------------------------
-// 세이브 & 로드 로직 (currentResource 속성 추가)
+// 세이브 & 로드 로직 
 // ---------------------------------------------------
 function saveGame() {
     const saveData = {
@@ -40,7 +41,7 @@ function saveGame() {
             id: n.id, x: n.x, y: n.y, 
             typeId: n.typeInfo.id, 
             resources: n.resources,
-            currentResource: n.currentResource // ★ 어떤 자원을 들고 있는지 저장
+            currentResource: n.currentResource
         })),
         links: links.map(l => ({ fromId: l.from.id, toId: l.to.id }))
     };
@@ -57,7 +58,7 @@ function loadGame() {
                 id: n.id, x: n.x, y: n.y, 
                 typeInfo: BUILDINGS[n.typeId], 
                 resources: n.resources || 0,
-                currentResource: n.currentResource || null // ★ 복구
+                currentResource: n.currentResource || null 
             })).filter(n => n.typeInfo);
             
             links = [];
@@ -71,11 +72,10 @@ function loadGame() {
 }
 
 // ---------------------------------------------------
-// ★ [신규] 1. 상단 UI 업데이트 함수 (창고 자원만 계산)
+// 상단 UI 및 자원 소모 로직
 // ---------------------------------------------------
 function updateResourceUI() {
     const owned = {};
-    // 창고(storage)이고, 자원이 1개 이상 들어있는 것들만 필터링
     nodes.filter(n => n.typeInfo.id === 'storage').forEach(n => {
         if (n.resources > 0 && n.currentResource) {
             owned[n.currentResource] = (owned[n.currentResource] || 0) + n.resources;
@@ -86,48 +86,31 @@ function updateResourceUI() {
     if (Object.keys(owned).length === 0) {
         bar.innerHTML = '보유 자원: 0';
     } else {
-        const html = Object.entries(owned).map(([res, count]) => {
-            return `<span>📦 ${I18N[res] || res}: ${count}</span>`;
-        }).join(' | ');
-        bar.innerHTML = html;
+        bar.innerHTML = Object.entries(owned).map(([res, count]) => `<span>📦 ${I18N[res] || res}: ${count}</span>`).join(' | ');
     }
 }
 
-// ---------------------------------------------------
-// ★ [신규] 4. 자원 소모 함수 (가장 오래된 창고부터 우선 사용)
-// ---------------------------------------------------
-// 나중에 기계를 건설할 때 이 함수를 호출하시면 됩니다. 예: consumeResource('copper', 10)
 export function consumeResource(resourceType, amount) {
-    // 1. 창고에 있는 해당 자원의 총합을 구함
     const total = nodes.filter(n => n.typeInfo.id === 'storage' && n.currentResource === resourceType)
                        .reduce((sum, n) => sum + n.resources, 0);
     
-    // 2. 자원이 부족하면 거절(false)
     if (total < amount) return false;
 
-    // 3. 자원이 충분하면, 창고들을 생성 시간(id)이 빠른 순서(오래된 순)로 정렬
-    let remainingToConsume = amount;
+    let remaining = amount;
     const storages = nodes.filter(n => n.typeInfo.id === 'storage' && n.currentResource === resourceType)
                           .sort((a, b) => a.id - b.id);
 
-    // 4. 순서대로 차감
     for (let s of storages) {
-        if (remainingToConsume <= 0) break;
-        
-        if (s.resources >= remainingToConsume) {
-            s.resources -= remainingToConsume;
-            remainingToConsume = 0;
+        if (remaining <= 0) break;
+        if (s.resources >= remaining) {
+            s.resources -= remaining; remaining = 0;
         } else {
-            remainingToConsume -= s.resources;
-            s.resources = 0;
+            remaining -= s.resources; s.resources = 0;
         }
-        
-        // 창고가 비워지면 다른 자원을 받을 수 있도록 초기화
         if (s.resources === 0) s.currentResource = null;
     }
-    
-    updateResourceUI(); // 소모 후 즉시 UI 갱신
-    return true; // 성공적으로 소모됨
+    updateResourceUI(); 
+    return true; 
 }
 
 // ---------------------------------------------------
@@ -195,10 +178,31 @@ document.getElementById('toggle-btn').addEventListener('click', () => {
 });
 
 // ---------------------------------------------------
-// 헬퍼 함수
+// 헬퍼 및 수학 함수
 // ---------------------------------------------------
 function screenToWorld(screenX, screenY) { return { x: (screenX - camera.x) / camera.zoom, y: (screenY - camera.y) / camera.zoom }; }
 function getBuildingAt(gx, gy) { return nodes.find(n => n.typeInfo.shape.some(block => (n.x + block.x) === gx && (n.y + block.y) === gy)); }
+
+// ★ [신규] 1칸 띄우기 (여백) 검사 함수
+function isValidPlacement(gridX, gridY, typeInfo, ignoredNode = null) {
+    let isValid = true;
+    typeInfo.shape.forEach(block => {
+        const targetX = gridX + block.x;
+        const targetY = gridY + block.y;
+        
+        // 해당 칸과 주변 8칸 모두 검사 (건물이 맞닿지 않도록)
+        for (let dx = -1; dx <= 1; dx++) {
+            for (let dy = -1; dy <= 1; dy++) {
+                const existing = getBuildingAt(targetX + dx, targetY + dy);
+                if (existing && existing !== ignoredNode) {
+                    isValid = false;
+                }
+            }
+        }
+    });
+    return isValid;
+}
+
 function getPorts(n) {
     const first = n.typeInfo.shape[0]; const last = n.typeInfo.shape[n.typeInfo.shape.length - 1];
     return {
@@ -206,6 +210,7 @@ function getPorts(n) {
         outX: (n.x + last.x) * TILE_SIZE + TILE_SIZE, outY: (n.y + last.y) * TILE_SIZE + (TILE_SIZE / 2)
     };
 }
+
 function canConnect(nodeA, nodeB) {
     let outType = nodeA.typeInfo.output; let inType = nodeB.typeInfo.input;
     if (!outType || !inType) return false;
@@ -213,6 +218,7 @@ function canConnect(nodeA, nodeB) {
     if (outType.includes('all') || inType.includes('all')) return true;
     return outType.some(resource => inType.includes(resource));
 }
+
 function distToSegment(P, A, B) {
     const l2 = (B.x - A.x)**2 + (B.y - A.y)**2;
     if (l2 === 0) return Math.hypot(P.x - A.x, P.y - A.y);
@@ -248,10 +254,8 @@ canvas.addEventListener('mousedown', (e) => {
 
         if (currentBuildMode) {
             const typeInfo = BUILDINGS[currentBuildMode];
-            let canBuild = true;
-            typeInfo.shape.forEach(block => { if (getBuildingAt(gridX + block.x, gridY + block.y)) canBuild = false; });
-            if (canBuild) {
-                // 노드 생성 시 currentResource 초기화
+            // ★ [수정] 1칸 띄우기 규칙 검사
+            if (isValidPlacement(gridX, gridY, typeInfo)) {
                 nodes.push({ id: Date.now(), x: gridX, y: gridY, typeInfo: typeInfo, resources: 0, currentResource: null });
                 currentBuildMode = null; 
                 document.querySelectorAll('.build-item').forEach(el => el.classList.remove('active'));
@@ -280,20 +284,27 @@ window.addEventListener('mousemove', (e) => {
             if (isDraggingNode) {
                 const targetGridX = Math.floor(worldPos.x / TILE_SIZE) - dragOffset.gridX;
                 const targetGridY = Math.floor(worldPos.y / TILE_SIZE) - dragOffset.gridY;
-                let canMove = true;
-                draggedNode.typeInfo.shape.forEach(b => {
-                    const existing = getBuildingAt(targetGridX + b.x, targetGridY + b.y);
-                    if (existing && existing !== draggedNode) canMove = false;
-                });
-                if (canMove) { draggedNode.x = targetGridX; draggedNode.y = targetGridY; }
+                
+                // ★ [수정] 1칸 띄우기 규칙 검사 (드래그 이동 중)
+                if (isValidPlacement(targetGridX, targetGridY, draggedNode.typeInfo, draggedNode)) { 
+                    draggedNode.x = targetGridX; draggedNode.y = targetGridY; 
+                }
             }
         } 
         else if (swipeTrail.length > 0) {
             swipeTrail.push(worldPos);
             if (swipeTrail.length > 15) swipeTrail.shift();
+            
+            // ★ [수정] 직각 선 자르기(스와이프) 충돌 로직 업데이트
             links = links.filter(link => {
                 const p1 = getPorts(link.from), p2 = getPorts(link.to);
-                return distToSegment(worldPos, {x: p1.outX, y: p1.outY}, {x: p2.inX, y: p2.inY}) > 15; 
+                const midX = (p1.outX + p2.inX) / 2;
+                
+                const d1 = distToSegment(worldPos, {x: p1.outX, y: p1.outY}, {x: midX, y: p1.outY});
+                const d2 = distToSegment(worldPos, {x: midX, y: p1.outY}, {x: midX, y: p2.inY});
+                const d3 = distToSegment(worldPos, {x: midX, y: p2.inY}, {x: p2.inX, y: p2.inY});
+                
+                return Math.min(d1, d2, d3) > 15; // 세 선분 중 하나라도 스치면 잘림
             });
         }
     }
@@ -328,47 +339,32 @@ function gameLoop() {
     const now = Date.now();
     
     if (now - lastTick > 1000) {
-        // 1. 자원 생산
         nodes.forEach(n => { 
             if (n.typeInfo.input === null && n.resources < n.typeInfo.maxCapacity) {
                 n.resources++;
-                // 채굴기: 자신이 생산하는 자원의 종류를 고정
-                if (!n.currentResource) {
-                    n.currentResource = Array.isArray(n.typeInfo.output) ? n.typeInfo.output[0] : n.typeInfo.output;
-                }
+                if (!n.currentResource) n.currentResource = Array.isArray(n.typeInfo.output) ? n.typeInfo.output[0] : n.typeInfo.output;
             } 
         });
 
-        // ★ 3. 섞임 방지 자원 이동 로직
         links.forEach(link => {
             if (link.from.resources > 0 && link.to.resources < link.to.typeInfo.maxCapacity) {
                 const resToMove = link.from.currentResource;
                 let canMove = true;
-
-                // [핵심] 받는 쪽에 이미 자원이 1개 이상 있는데, 들어오려는 자원과 종류가 다르다면 섞임 방지!
-                if (link.to.resources > 0 && link.to.currentResource !== resToMove) {
-                    canMove = false; 
-                }
+                if (link.to.resources > 0 && link.to.currentResource !== resToMove) canMove = false; 
 
                 if (canMove) {
                     link.from.resources--;
-                    // 보내는 쪽(창고)이 비워지면 자원 종류를 null로 초기화 (새로운 자원을 받을 수 있게)
-                    if (link.from.resources === 0 && link.from.typeInfo.id === 'storage') {
-                        link.from.currentResource = null;
-                    }
-
-                    link.to.resources++;
-                    link.to.currentResource = resToMove; // 받는 쪽에 자원 종류 각인
+                    if (link.from.resources === 0 && link.from.typeInfo.id === 'storage') link.from.currentResource = null;
+                    link.to.resources++; link.to.currentResource = resToMove; 
                 }
             }
         });
         
-        updateResourceUI(); // 자원 변동이 있었으니 상단 UI 갱신
+        updateResourceUI(); 
         saveGame(); 
         lastTick = now;
     }
 
-    // 렌더링 시작
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.save(); ctx.translate(camera.x, camera.y); ctx.scale(camera.zoom, camera.zoom);
 
@@ -396,9 +392,17 @@ function gameLoop() {
         ctx.strokeStyle = 'rgba(231, 76, 60, 0.8)'; ctx.lineWidth = 4 / camera.zoom; ctx.lineCap = 'round'; ctx.stroke();
     }
 
+    // ★ [수정] 선을 대각선이 아닌 직각(Orthogonal) 모양으로 그리기
     links.forEach(link => {
         const p1 = getPorts(link.from), p2 = getPorts(link.to);
-        ctx.beginPath(); ctx.moveTo(p1.outX, p1.outY); ctx.lineTo(p2.inX, p2.inY);
+        const midX = (p1.outX + p2.inX) / 2; // 선이 꺾이는 중간 지점
+
+        ctx.beginPath(); 
+        ctx.moveTo(p1.outX, p1.outY); 
+        ctx.lineTo(midX, p1.outY);    // 오른쪽으로 직진
+        ctx.lineTo(midX, p2.inY);     // 위아래로 꺾임
+        ctx.lineTo(p2.inX, p2.inY);   // 다시 목표를 향해 직진
+        
         ctx.shadowBlur = 8; ctx.shadowColor = 'white'; 
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)'; 
         ctx.lineWidth = 4; ctx.stroke();
@@ -407,8 +411,15 @@ function gameLoop() {
 
     nodes.forEach(n => {
         const ports = getPorts(n);
-        ctx.fillStyle = '#2ecc71'; ctx.beginPath(); ctx.arc(ports.inX, ports.inY, 6, 0, Math.PI*2); ctx.fill(); ctx.stroke();
-        ctx.fillStyle = '#e74c3c'; ctx.beginPath(); ctx.arc(ports.outX, ports.outY, 6, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+        
+        // ★ [수정] 포트를 동그라미에서 각진 사각형(Square)으로 변경
+        ctx.fillStyle = '#2ecc71'; ctx.strokeStyle = '#1a252f'; ctx.lineWidth = 1;
+        ctx.fillRect(ports.inX - 6, ports.inY - 6, 12, 12);
+        ctx.strokeRect(ports.inX - 6, ports.inY - 6, 12, 12);
+        
+        ctx.fillStyle = '#e74c3c'; 
+        ctx.fillRect(ports.outX - 6, ports.outY - 6, 12, 12);
+        ctx.strokeRect(ports.outX - 6, ports.outY - 6, 12, 12);
 
         let maxX = 0, maxY = 0;
         n.typeInfo.shape.forEach(b => { if(b.x > maxX) maxX = b.x; if(b.y > maxY) maxY = b.y; });
@@ -423,16 +434,11 @@ function gameLoop() {
 
         const inTxt = `IN: ${formatIO(n.typeInfo.input)}`;
         const outTxt = `OUT: ${formatIO(n.typeInfo.output)}`;
-
-        // ★ 기계 내부에 현재 어떤 자원(currentResource)이 들었는지 표기
         const resName = n.currentResource ? (I18N[n.currentResource] || n.currentResource) : '';
 
         ctx.fillStyle = 'white'; ctx.textAlign = 'center';
         ctx.font = 'bold 12px Arial'; ctx.fillText(n.typeInfo.name, centerX, centerY - 15);
-        
-        // "구리 10 / 1000" 형태로 출력
         ctx.font = '14px Arial'; ctx.fillText(`${resName} ${n.resources} / ${n.typeInfo.maxCapacity}`, centerX, centerY + 5);
-        
         ctx.font = '10px Arial'; ctx.fillStyle = '#bdc3c7';
         ctx.fillText(inTxt, centerX, centerY + 20);
         ctx.fillText(outTxt, centerX, centerY + 32);
