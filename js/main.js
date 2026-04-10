@@ -1,7 +1,7 @@
 // js/main.js
 console.log("🚀 게임 스크립트가 정상적으로 로드되었습니다!");
 
-import { TILE_SIZE, BUILDINGS } from '../data/config.js';
+import { TILE_SIZE, BUILDINGS, UPGRADES, INITIAL_UNLOCKED, TRANSFER_RATE } from '../data/config.js';
 import { I18N } from '../data/i18n.js';
 
 const canvas = document.getElementById('gameCanvas');
@@ -21,6 +21,7 @@ let nodes = [];
 let links = [];
 let currentBuildMode = null;
 let selectedNode = null;
+let purchasedUpgrades = []; // 구매한 업그레이드 목록
 
 let isLeftDown = false;
 let draggedNode = null;
@@ -32,17 +33,13 @@ let swipeTrail = [];
 const SAVE_KEY = 'spaceFactorySaveData';
 
 // ---------------------------------------------------
-// 세이브 & 로드 로직 
+// 세이브 & 로드 
 // ---------------------------------------------------
 function saveGame() {
     const saveData = {
         camera: camera,
-        nodes: nodes.map(n => ({ 
-            id: n.id, x: n.x, y: n.y, 
-            typeId: n.typeInfo.id, 
-            resources: n.resources,
-            currentResource: n.currentResource
-        })),
+        purchasedUpgrades: purchasedUpgrades,
+        nodes: nodes.map(n => ({ id: n.id, x: n.x, y: n.y, typeId: n.typeInfo.id, inventory: n.inventory })),
         links: links.map(l => ({ fromId: l.from.id, toId: l.to.id }))
     };
     localStorage.setItem(SAVE_KEY, JSON.stringify(saveData));
@@ -54,11 +51,10 @@ function loadGame() {
         try {
             const saveData = JSON.parse(savedStr);
             if (saveData.camera) camera = saveData.camera;
+            if (saveData.purchasedUpgrades) purchasedUpgrades = saveData.purchasedUpgrades;
+            
             nodes = saveData.nodes.map(n => ({
-                id: n.id, x: n.x, y: n.y, 
-                typeInfo: BUILDINGS[n.typeId], 
-                resources: n.resources || 0,
-                currentResource: n.currentResource || null 
+                id: n.id, x: n.x, y: n.y, typeInfo: BUILDINGS[n.typeId], inventory: n.inventory || {}
             })).filter(n => n.typeInfo);
             
             links = [];
@@ -72,110 +68,139 @@ function loadGame() {
 }
 
 // ---------------------------------------------------
-// 상단 UI 및 자원 소모 로직
+// 자원 UI & 소모 시스템
 // ---------------------------------------------------
 function updateResourceUI() {
     const owned = {};
     nodes.filter(n => n.typeInfo.id === 'storage').forEach(n => {
-        if (n.resources > 0 && n.currentResource) {
-            owned[n.currentResource] = (owned[n.currentResource] || 0) + n.resources;
-        }
+        Object.keys(n.inventory).forEach(res => {
+            if (n.inventory[res] >= 1) owned[res] = (owned[res] || 0) + n.inventory[res];
+        });
     });
 
     const bar = document.getElementById('resource-bar');
-    if (Object.keys(owned).length === 0) {
-        bar.innerHTML = '보유 자원: 0';
-    } else {
-        bar.innerHTML = Object.entries(owned).map(([res, count]) => `<span>📦 ${I18N[res] || res}: ${count}</span>`).join(' | ');
-    }
+    if (Object.keys(owned).length === 0) bar.innerHTML = '보유 자원: 0';
+    else bar.innerHTML = Object.entries(owned).map(([res, count]) => `<span>📦 ${I18N[res] || res}: ${Math.floor(count)}</span>`).join(' | ');
 }
 
-export function consumeResource(resourceType, amount) {
-    const total = nodes.filter(n => n.typeInfo.id === 'storage' && n.currentResource === resourceType)
-                       .reduce((sum, n) => sum + n.resources, 0);
-    
-    if (total < amount) return false;
-
-    let remaining = amount;
-    const storages = nodes.filter(n => n.typeInfo.id === 'storage' && n.currentResource === resourceType)
-                          .sort((a, b) => a.id - b.id);
-
-    for (let s of storages) {
-        if (remaining <= 0) break;
-        if (s.resources >= remaining) {
-            s.resources -= remaining; remaining = 0;
-        } else {
-            remaining -= s.resources; s.resources = 0;
+// 자원 소모 함수 (비용 객체를 통째로 받음)
+export function consumeResource(costs) {
+    // 1. 자원이 모두 충분한지 검사
+    for (let res in costs) {
+        let total = nodes.filter(n => n.typeInfo.id === 'storage').reduce((sum, n) => sum + (n.inventory[res] || 0), 0);
+        if (total < costs[res]) return false;
+    }
+    // 2. 가장 오래된 창고부터 차감
+    for (let res in costs) {
+        let remaining = costs[res];
+        const storages = nodes.filter(n => n.typeInfo.id === 'storage' && (n.inventory[res] || 0) > 0).sort((a, b) => a.id - b.id);
+        for (let s of storages) {
+            if (remaining <= 0) break;
+            if (s.inventory[res] >= remaining) {
+                s.inventory[res] -= remaining; remaining = 0;
+            } else {
+                remaining -= s.inventory[res]; s.inventory[res] = 0;
+            }
+            if (s.inventory[res] <= 0) delete s.inventory[res];
         }
-        if (s.resources === 0) s.currentResource = null;
     }
     updateResourceUI(); 
     return true; 
 }
 
 // ---------------------------------------------------
-// UI 및 설정 모달 이벤트
+// UI 및 모달 이벤트
 // ---------------------------------------------------
-const settingsBtn = document.getElementById('settings-btn');
 const settingsModal = document.getElementById('settings-modal');
-const closeModalBtn = document.getElementById('close-modal-btn');
+const upgradesModal = document.getElementById('upgrades-modal');
 
-if (settingsBtn) settingsBtn.addEventListener('click', () => { settingsModal.style.display = 'flex'; });
-if (closeModalBtn) closeModalBtn.addEventListener('click', () => { settingsModal.style.display = 'none'; });
+document.getElementById('settings-btn').addEventListener('click', () => { settingsModal.style.display = 'flex'; });
+document.getElementById('upgrades-btn').addEventListener('click', () => { renderUpgrades(); upgradesModal.style.display = 'flex'; });
 
-const exportBtn = document.getElementById('export-btn');
-if (exportBtn) {
-    exportBtn.addEventListener('click', () => {
-        saveGame();
-        const savedStr = localStorage.getItem(SAVE_KEY);
-        if (!savedStr) return alert("데이터 없음");
-        const blob = new Blob([savedStr], { type: "text/plain" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a'); a.href = url; a.download = "space_factory_save.txt"; a.click();
-        URL.revokeObjectURL(url);
-    });
-}
+document.querySelectorAll('.close-modal-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => { e.target.closest('.modal').style.display = 'none'; });
+});
 
-const importBtn = document.getElementById('import-btn');
-if (importBtn) {
-    importBtn.addEventListener('click', () => {
-        const importStr = document.getElementById('import-text').value.trim();
-        if (!importStr) return alert("텍스트 입력 요망");
-        try {
-            JSON.parse(importStr);
-            localStorage.setItem(SAVE_KEY, importStr);
-            alert("로드 성공!"); location.reload();
-        } catch (e) { alert("잘못된 형식"); }
-    });
-}
+document.getElementById('export-btn').addEventListener('click', () => {
+    saveGame();
+    const savedStr = localStorage.getItem(SAVE_KEY);
+    if (!savedStr) return alert("데이터 없음");
+    const blob = new Blob([savedStr], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = "space_factory_save.txt"; a.click();
+    URL.revokeObjectURL(url);
+});
 
-const resetBtn = document.getElementById('reset-btn');
-if (resetBtn) {
-    resetBtn.addEventListener('click', () => {
-        if (confirm("초기화 하시겠습니까?")) { localStorage.removeItem(SAVE_KEY); location.reload(); }
-    });
-}
+document.getElementById('import-btn').addEventListener('click', () => {
+    const importStr = document.getElementById('import-text').value.trim();
+    if (!importStr) return alert("텍스트 입력 요망");
+    try { JSON.parse(importStr); localStorage.setItem(SAVE_KEY, importStr); alert("로드 성공!"); location.reload(); } catch (e) { alert("잘못된 형식"); }
+});
 
-const menuContainer = document.getElementById('build-menu-container');
-Object.values(BUILDINGS).forEach(b => {
-    const btn = document.createElement('div');
-    btn.className = 'build-item';
-    let shapeText = b.shape.length > 1 ? `(${b.shape.length}칸)` : `(1칸)`;
-    btn.innerHTML = `<div class="color-box" style="background-color:${b.color};"></div>
-                     <div><b>${b.name}</b> <small>${shapeText}</small></div>`;
-    btn.addEventListener('click', () => {
-        document.querySelectorAll('.build-item').forEach(el => el.classList.remove('active'));
-        if (currentBuildMode === b.id) currentBuildMode = null;
-        else { btn.classList.add('active'); currentBuildMode = b.id; selectedNode = null; }
-    });
-    menuContainer.appendChild(btn);
+document.getElementById('reset-btn').addEventListener('click', () => {
+    if (confirm("초기화 하시겠습니까?")) { localStorage.removeItem(SAVE_KEY); location.reload(); }
 });
 
 document.getElementById('toggle-btn').addEventListener('click', () => {
     const sidebar = document.getElementById('sidebar');
     sidebar.classList.toggle('open');
-    document.getElementById('toggle-btn').innerText = sidebar.classList.contains('open') ? '건설 메뉴 닫기 ▶' : '건설 메뉴 열기 ◀';
+    document.getElementById('toggle-btn').innerText = sidebar.classList.contains('open') ? '건설 메뉴 닫기 ▶' : '건설 메뉴 ◀';
 });
+
+// 건설 메뉴 렌더링 (해금 상태 반영)
+function renderBuildMenu() {
+    const menuContainer = document.getElementById('build-menu-container');
+    menuContainer.innerHTML = '';
+    
+    // 기본 해금 건물 + 업그레이드로 해금된 건물 합치기
+    let unlocked = [...INITIAL_UNLOCKED];
+    purchasedUpgrades.forEach(upgId => { unlocked.push(...UPGRADES[upgId].unlocks); });
+
+    unlocked.forEach(buildingId => {
+        const b = BUILDINGS[buildingId];
+        if (!b) return;
+        const btn = document.createElement('div');
+        btn.className = 'build-item';
+        let shapeText = b.shape.length > 1 ? `(${b.shape.length}칸)` : `(1칸)`;
+        btn.innerHTML = `<div class="color-box" style="background-color:${b.color};"></div>
+                         <div><b>${b.name}</b> <small>${shapeText}</small></div>`;
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.build-item').forEach(el => el.classList.remove('active'));
+            if (currentBuildMode === b.id) currentBuildMode = null;
+            else { btn.classList.add('active'); currentBuildMode = b.id; selectedNode = null; }
+        });
+        menuContainer.appendChild(btn);
+    });
+}
+
+// 업그레이드 메뉴 렌더링
+function renderUpgrades() {
+    const list = document.getElementById('upgrades-list');
+    list.innerHTML = '';
+    Object.values(UPGRADES).forEach(upg => {
+        const div = document.createElement('div');
+        div.className = 'upgrade-item';
+        const isPurchased = purchasedUpgrades.includes(upg.id);
+        const costText = Object.entries(upg.cost).map(([k, v]) => `${I18N[k]||k} ${v}개`).join(', ');
+        
+        div.innerHTML = `
+            <div><b>${upg.name}</b><br><small style="color:#bdc3c7">${upg.desc}</small><br><span style="color:#f39c12; font-size:12px;">비용: ${costText}</span></div>
+            <button class="upgrade-btn" ${isPurchased ? 'disabled' : ''}>${isPurchased ? '완료' : '연구'}</button>
+        `;
+        if (!isPurchased) {
+            div.querySelector('button').addEventListener('click', () => {
+                if (consumeResource(upg.cost)) {
+                    purchasedUpgrades.push(upg.id);
+                    renderUpgrades(); renderBuildMenu(); saveGame();
+                    alert(`${upg.name} 연구 완료! 새로운 건물이 건설 탭에 추가되었습니다.`);
+                } else {
+                    alert("창고에 자원이 부족합니다!");
+                }
+            });
+        }
+        list.appendChild(div);
+    });
+}
 
 // ---------------------------------------------------
 // 헬퍼 및 수학 함수
@@ -183,20 +208,14 @@ document.getElementById('toggle-btn').addEventListener('click', () => {
 function screenToWorld(screenX, screenY) { return { x: (screenX - camera.x) / camera.zoom, y: (screenY - camera.y) / camera.zoom }; }
 function getBuildingAt(gx, gy) { return nodes.find(n => n.typeInfo.shape.some(block => (n.x + block.x) === gx && (n.y + block.y) === gy)); }
 
-// ★ [신규] 1칸 띄우기 (여백) 검사 함수
 function isValidPlacement(gridX, gridY, typeInfo, ignoredNode = null) {
     let isValid = true;
     typeInfo.shape.forEach(block => {
-        const targetX = gridX + block.x;
-        const targetY = gridY + block.y;
-        
-        // 해당 칸과 주변 8칸 모두 검사 (건물이 맞닿지 않도록)
+        const targetX = gridX + block.x; const targetY = gridY + block.y;
         for (let dx = -1; dx <= 1; dx++) {
             for (let dy = -1; dy <= 1; dy++) {
                 const existing = getBuildingAt(targetX + dx, targetY + dy);
-                if (existing && existing !== ignoredNode) {
-                    isValid = false;
-                }
+                if (existing && existing !== ignoredNode) isValid = false;
             }
         }
     });
@@ -216,7 +235,7 @@ function canConnect(nodeA, nodeB) {
     if (!outType || !inType) return false;
     if (!Array.isArray(outType)) outType = [outType]; if (!Array.isArray(inType)) inType = [inType];
     if (outType.includes('all') || inType.includes('all')) return true;
-    return outType.some(resource => inType.includes(resource));
+    return outType.some(res => inType.includes(res));
 }
 
 function distToSegment(P, A, B) {
@@ -232,7 +251,7 @@ function distToSegment(P, A, B) {
 // 마우스 이벤트
 // ---------------------------------------------------
 canvas.addEventListener('wheel', (e) => {
-    if (settingsModal && settingsModal.style.display === 'flex') return;
+    if (settingsModal.style.display === 'flex' || upgradesModal.style.display === 'flex') return;
     const zoomAmount = 0.1; const oldZoom = camera.zoom;
     if (e.deltaY < 0) camera.zoom = Math.min(camera.zoom + zoomAmount, 3);
     else camera.zoom = Math.max(camera.zoom - zoomAmount, 0.4);
@@ -242,7 +261,7 @@ canvas.addEventListener('wheel', (e) => {
 canvas.addEventListener('contextmenu', e => e.preventDefault());
 
 canvas.addEventListener('mousedown', (e) => {
-    if (settingsModal && settingsModal.style.display === 'flex') return;
+    if (settingsModal.style.display === 'flex' || upgradesModal.style.display === 'flex') return;
     if (e.button === 2) { 
         isRightDragging = true; lastMouse = { x: e.clientX, y: e.clientY }; 
     } 
@@ -254,9 +273,8 @@ canvas.addEventListener('mousedown', (e) => {
 
         if (currentBuildMode) {
             const typeInfo = BUILDINGS[currentBuildMode];
-            // ★ [수정] 1칸 띄우기 규칙 검사
             if (isValidPlacement(gridX, gridY, typeInfo)) {
-                nodes.push({ id: Date.now(), x: gridX, y: gridY, typeInfo: typeInfo, resources: 0, currentResource: null });
+                nodes.push({ id: Date.now(), x: gridX, y: gridY, typeInfo: typeInfo, inventory: {} });
                 currentBuildMode = null; 
                 document.querySelectorAll('.build-item').forEach(el => el.classList.remove('active'));
             }
@@ -272,7 +290,6 @@ canvas.addEventListener('mousedown', (e) => {
 });
 
 window.addEventListener('mousemove', (e) => {
-    if (settingsModal && settingsModal.style.display === 'flex') return;
     if (isRightDragging) {
         camera.x += (e.clientX - lastMouse.x); camera.y += (e.clientY - lastMouse.y);
         lastMouse = { x: e.clientX, y: e.clientY }; return;
@@ -284,8 +301,6 @@ window.addEventListener('mousemove', (e) => {
             if (isDraggingNode) {
                 const targetGridX = Math.floor(worldPos.x / TILE_SIZE) - dragOffset.gridX;
                 const targetGridY = Math.floor(worldPos.y / TILE_SIZE) - dragOffset.gridY;
-                
-                // ★ [수정] 1칸 띄우기 규칙 검사 (드래그 이동 중)
                 if (isValidPlacement(targetGridX, targetGridY, draggedNode.typeInfo, draggedNode)) { 
                     draggedNode.x = targetGridX; draggedNode.y = targetGridY; 
                 }
@@ -294,17 +309,13 @@ window.addEventListener('mousemove', (e) => {
         else if (swipeTrail.length > 0) {
             swipeTrail.push(worldPos);
             if (swipeTrail.length > 15) swipeTrail.shift();
-            
-            // ★ [수정] 직각 선 자르기(스와이프) 충돌 로직 업데이트
             links = links.filter(link => {
                 const p1 = getPorts(link.from), p2 = getPorts(link.to);
                 const midX = (p1.outX + p2.inX) / 2;
-                
                 const d1 = distToSegment(worldPos, {x: p1.outX, y: p1.outY}, {x: midX, y: p1.outY});
                 const d2 = distToSegment(worldPos, {x: midX, y: p1.outY}, {x: midX, y: p2.inY});
                 const d3 = distToSegment(worldPos, {x: midX, y: p2.inY}, {x: p2.inX, y: p2.inY});
-                
-                return Math.min(d1, d2, d3) > 15; // 세 선분 중 하나라도 스치면 잘림
+                return Math.min(d1, d2, d3) > 15; 
             });
         }
     }
@@ -328,43 +339,92 @@ window.addEventListener('mouseup', (e) => {
     }
 });
 
-// 시작
+// 시작 초기화
 loadGame();
-let lastTick = Date.now();
+renderBuildMenu();
+updateResourceUI();
 
 // ---------------------------------------------------
-// 게임 루프 및 렌더링
+// 게임 루프 (Frame Time 기반)
 // ---------------------------------------------------
-function gameLoop() {
-    const now = Date.now();
-    
-    if (now - lastTick > 1000) {
-        nodes.forEach(n => { 
-            if (n.typeInfo.input === null && n.resources < n.typeInfo.maxCapacity) {
-                n.resources++;
-                if (!n.currentResource) n.currentResource = Array.isArray(n.typeInfo.output) ? n.typeInfo.output[0] : n.typeInfo.output;
-            } 
-        });
+let lastTime = performance.now();
+let saveTimer = 0;
 
-        links.forEach(link => {
-            if (link.from.resources > 0 && link.to.resources < link.to.typeInfo.maxCapacity) {
-                const resToMove = link.from.currentResource;
-                let canMove = true;
-                if (link.to.resources > 0 && link.to.currentResource !== resToMove) canMove = false; 
+function gameLoop(time) {
+    let deltaSec = (time - lastTime) / 1000;
+    if (deltaSec > 0.5) deltaSec = 0.5; // 탭 이동 시 튐 방지
+    lastTime = time;
 
-                if (canMove) {
-                    link.from.resources--;
-                    if (link.from.resources === 0 && link.from.typeInfo.id === 'storage') link.from.currentResource = null;
-                    link.to.resources++; link.to.currentResource = resToMove; 
-                }
+    // 1. 노드 생산 (실수 기반 누적)
+    nodes.forEach(n => {
+        const type = n.typeInfo;
+        let totalInv = Object.values(n.inventory).reduce((a,b)=>a+b, 0);
+        if (totalInv >= type.maxCapacity) return; // 꽉 참
+
+        if (type.input === null) {
+            // 채굴기
+            let outRes = Array.isArray(type.output) ? type.output[0] : type.output;
+            n.inventory[outRes] = (n.inventory[outRes] || 0) + (type.generationPerSec * deltaSec);
+        } else if (type.recipe) {
+            // 공장 (다중 입력)
+            let maxProd = type.generationPerSec * deltaSec;
+            for (let reqRes in type.recipe) {
+                // 가지고 있는 재료 비율에 맞춰 생산량 조절
+                maxProd = Math.min(maxProd, (n.inventory[reqRes] || 0) / type.recipe[reqRes]);
             }
-        });
-        
-        updateResourceUI(); 
-        saveGame(); 
-        lastTick = now;
-    }
+            if (maxProd > 0) {
+                for (let reqRes in type.recipe) {
+                    n.inventory[reqRes] -= type.recipe[reqRes] * maxProd;
+                    if (n.inventory[reqRes] <= 0) delete n.inventory[reqRes];
+                }
+                let outRes = Array.isArray(type.output) ? type.output[0] : type.output;
+                n.inventory[outRes] = (n.inventory[outRes] || 0) + maxProd;
+            }
+        }
+    });
 
+    // 2. 자원 이동 (초당 TRANSFER_RATE 만큼 부드럽게)
+    links.forEach(link => {
+        const from = link.from; const to = link.to;
+        let availableRes = Object.keys(from.inventory).filter(k => from.inventory[k] > 0);
+        if (availableRes.length === 0) return;
+        
+        let resToMove = availableRes[0]; // 이동할 자원 선택
+        
+        // 도착지 수용 규칙 검사
+        let inType = to.typeInfo.input;
+        if (!inType) return;
+        if (!Array.isArray(inType)) inType = [inType];
+        if (!inType.includes('all') && !inType.includes(resToMove)) return;
+
+        // 창고 섞임 방지 규칙
+        if (to.typeInfo.id === 'storage') {
+            let existingRes = Object.keys(to.inventory).filter(k => to.inventory[k] > 0);
+            if (existingRes.length > 0 && existingRes[0] !== resToMove) return;
+        }
+
+        let maxMove = TRANSFER_RATE * deltaSec; // 설정된 이동 속도
+        let moveAmt = Math.min(maxMove, from.inventory[resToMove]);
+        
+        let toTotal = Object.values(to.inventory).reduce((a,b)=>a+b, 0);
+        moveAmt = Math.min(moveAmt, to.typeInfo.maxCapacity - toTotal); // 빈공간 한계
+
+        if (moveAmt > 0) {
+            from.inventory[resToMove] -= moveAmt;
+            to.inventory[resToMove] = (to.inventory[resToMove] || 0) + moveAmt;
+            if (from.inventory[resToMove] <= 0) delete from.inventory[resToMove];
+        }
+    });
+
+    updateResourceUI(); 
+
+    // 자동 저장 (1초마다)
+    saveTimer += deltaSec;
+    if (saveTimer > 1) { saveGame(); saveTimer = 0; }
+
+    // ---------------------------------------------------
+    // 렌더링
+    // ---------------------------------------------------
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.save(); ctx.translate(camera.x, camera.y); ctx.scale(camera.zoom, camera.zoom);
 
@@ -392,34 +452,20 @@ function gameLoop() {
         ctx.strokeStyle = 'rgba(231, 76, 60, 0.8)'; ctx.lineWidth = 4 / camera.zoom; ctx.lineCap = 'round'; ctx.stroke();
     }
 
-    // ★ [수정] 선을 대각선이 아닌 직각(Orthogonal) 모양으로 그리기
     links.forEach(link => {
         const p1 = getPorts(link.from), p2 = getPorts(link.to);
-        const midX = (p1.outX + p2.inX) / 2; // 선이 꺾이는 중간 지점
-
-        ctx.beginPath(); 
-        ctx.moveTo(p1.outX, p1.outY); 
-        ctx.lineTo(midX, p1.outY);    // 오른쪽으로 직진
-        ctx.lineTo(midX, p2.inY);     // 위아래로 꺾임
-        ctx.lineTo(p2.inX, p2.inY);   // 다시 목표를 향해 직진
-        
-        ctx.shadowBlur = 8; ctx.shadowColor = 'white'; 
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)'; 
-        ctx.lineWidth = 4; ctx.stroke();
-        ctx.shadowBlur = 0; 
+        const midX = (p1.outX + p2.inX) / 2;
+        ctx.beginPath(); ctx.moveTo(p1.outX, p1.outY); ctx.lineTo(midX, p1.outY); ctx.lineTo(midX, p2.inY); ctx.lineTo(p2.inX, p2.inY);
+        ctx.shadowBlur = 8; ctx.shadowColor = 'white'; ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)'; 
+        ctx.lineWidth = 4; ctx.stroke(); ctx.shadowBlur = 0; 
     });
 
     nodes.forEach(n => {
         const ports = getPorts(n);
-        
-        // ★ [수정] 포트를 동그라미에서 각진 사각형(Square)으로 변경
         ctx.fillStyle = '#2ecc71'; ctx.strokeStyle = '#1a252f'; ctx.lineWidth = 1;
-        ctx.fillRect(ports.inX - 6, ports.inY - 6, 12, 12);
-        ctx.strokeRect(ports.inX - 6, ports.inY - 6, 12, 12);
-        
+        ctx.fillRect(ports.inX - 6, ports.inY - 6, 12, 12); ctx.strokeRect(ports.inX - 6, ports.inY - 6, 12, 12);
         ctx.fillStyle = '#e74c3c'; 
-        ctx.fillRect(ports.outX - 6, ports.outY - 6, 12, 12);
-        ctx.strokeRect(ports.outX - 6, ports.outY - 6, 12, 12);
+        ctx.fillRect(ports.outX - 6, ports.outY - 6, 12, 12); ctx.strokeRect(ports.outX - 6, ports.outY - 6, 12, 12);
 
         let maxX = 0, maxY = 0;
         n.typeInfo.shape.forEach(b => { if(b.x > maxX) maxX = b.x; if(b.y > maxY) maxY = b.y; });
@@ -427,25 +473,29 @@ function gameLoop() {
         const centerY = (n.y + maxY/2) * TILE_SIZE + (TILE_SIZE / 2);
 
         const formatIO = (io) => {
-            if (!io) return '없음';
-            const arr = Array.isArray(io) ? io : [io];
+            if (!io) return '없음'; const arr = Array.isArray(io) ? io : [io];
             return arr.map(res => I18N[res] || res).join(', '); 
         };
 
-        const inTxt = `IN: ${formatIO(n.typeInfo.input)}`;
-        const outTxt = `OUT: ${formatIO(n.typeInfo.output)}`;
-        const resName = n.currentResource ? (I18N[n.currentResource] || n.currentResource) : '';
+        // 인벤토리 텍스트 생성 (돌: 10, 목재: 5)
+        let totalInv = 0;
+        const invKeys = Object.keys(n.inventory).filter(k => Math.floor(n.inventory[k]) > 0);
+        const invText = invKeys.length > 0 
+            ? invKeys.map(k => `${I18N[k]||k} ${Math.floor(n.inventory[k])}`).join(', ')
+            : '비어있음';
+        Object.values(n.inventory).forEach(v => totalInv += v);
 
         ctx.fillStyle = 'white'; ctx.textAlign = 'center';
         ctx.font = 'bold 12px Arial'; ctx.fillText(n.typeInfo.name, centerX, centerY - 15);
-        ctx.font = '14px Arial'; ctx.fillText(`${resName} ${n.resources} / ${n.typeInfo.maxCapacity}`, centerX, centerY + 5);
+        ctx.font = '13px Arial'; ctx.fillText(invText, centerX, centerY + 3);
+        ctx.font = '11px Arial'; ctx.fillText(`(${Math.floor(totalInv)} / ${n.typeInfo.maxCapacity})`, centerX, centerY + 16);
         ctx.font = '10px Arial'; ctx.fillStyle = '#bdc3c7';
-        ctx.fillText(inTxt, centerX, centerY + 20);
-        ctx.fillText(outTxt, centerX, centerY + 32);
+        ctx.fillText(`IN: ${formatIO(n.typeInfo.input)}`, centerX, centerY + 30);
+        ctx.fillText(`OUT: ${formatIO(n.typeInfo.output)}`, centerX, centerY + 42);
     });
 
     ctx.restore();
     requestAnimationFrame(gameLoop);
 }
 
-gameLoop();
+requestAnimationFrame(gameLoop);

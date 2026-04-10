@@ -2,11 +2,15 @@
 
 export const I18N = {
     'all': '모든자원',
-    'copper': '구리',
-    'steel': '강철',
     'stone': '돌',
-    'advanced_part': '고급부품'
+    'wood': '목재',
+    'iron': '철',
+    'steel': '강철',
+    'brick': '벽돌',
+    'sawmill': '제재소',
+    'stone_miner': '돌 채굴기',
+    'iron_miner': '철 채굴기',
+    'steel_factory': '강철 제련소',
+    'stone_factory': '석재 공장',
+    'storage': '종합 물류창고'
 };
-
-// 💡 팁: 나중에 영어를 추가하고 싶다면 아래처럼 확장할 수도 있습니다.
-// export const I18N_EN = { 'all': 'All', 'copper': 'Copper', ... };
